@@ -269,30 +269,25 @@ async def generate_strategy(request: StrategyRequest):
 async def send_campaign(request: SendCampaignRequest):
     """
     Connects to Mailtrap API using the official SDK to dispatch the HTML email.
-    Forces sender to 'hello@demomailtrap.co' and recipient to request.email
+    Forces sender to 'hello@demomailtrap.co' and recipient to the verified TEST_RECIPIENT_EMAIL
     to support demo accounts, appending the original recipient email to the text body and HTML.
     """
     MAILTRAP_API_TOKEN = os.getenv("MAILTRAP_API_TOKEN")
-    
-    # Ensure recipient email is provided
-    recipient_email = request.email
-    if not recipient_email:
-        raise HTTPException(
-            status_code=400,
-            detail="Recipient email address (request.email) must be provided."
-        )
+    TEST_RECIPIENT_EMAIL = os.getenv("TEST_RECIPIENT_EMAIL")
 
     # Check for placeholders or missing credentials
     is_placeholder = (
         not MAILTRAP_API_TOKEN or 
-        MAILTRAP_API_TOKEN == "your_mailtrap_api_token"
+        MAILTRAP_API_TOKEN == "your_mailtrap_api_token" or 
+        not TEST_RECIPIENT_EMAIL or 
+        TEST_RECIPIENT_EMAIL == "your_verified_email_here"
     )
 
     if is_placeholder:
         logger.info(f"[MAILTRAP SIMULATION] Sent HTML email to {request.customerName} ({request.email}). Subject: {request.subject}")
         return {
             "status": "simulated",
-            "message": f"HTML Email successfully simulated for {request.customerName} (Product: {request.productName}). Configure real MAILTRAP_API_TOKEN in backend/.env to send live."
+            "message": f"HTML Email successfully simulated for {request.customerName} (Product: {request.productName}). Configure real MAILTRAP_API_TOKEN and TEST_RECIPIENT_EMAIL in backend/.env to send live."
         }
 
     try:
@@ -482,19 +477,19 @@ async def send_campaign(request: SendCampaignRequest):
         # Create mail envelope with both text and html
         mail = mt.Mail(
             sender=mt.Address(email="hello@demomailtrap.co", name="InsightFlow AI"),
-            to=[mt.Address(email=recipient_email, name=request.customerName)],
+            to=[mt.Address(email=TEST_RECIPIENT_EMAIL, name=request.customerName)],
             subject=request.subject,
             text=full_body,
             html=html_content,
         )
 
-        logger.info(f"Delivering HTML email via Mailtrap SDK to verified test email: {recipient_email}...")
+        logger.info(f"Delivering HTML email via Mailtrap SDK to verified test email: {TEST_RECIPIENT_EMAIL}...")
         client.send(mail)
 
         logger.info("HTML Email delivered successfully via Mailtrap.")
         return {
             "status": "sent",
-            "message": f"HTML Email successfully dispatched to verified testing inbox ({recipient_email})!"
+            "message": f"HTML Email successfully dispatched to verified testing inbox ({TEST_RECIPIENT_EMAIL})!"
         }
 
     except Exception as err:
