@@ -269,11 +269,11 @@ async def generate_strategy(request: StrategyRequest):
 async def send_campaign(request: SendCampaignRequest):
     """
     Connects to Mailtrap API using the official SDK to dispatch the HTML email.
-    Forces sender to 'hello@demomailtrap.co' and recipient to the verified userEmail
+    Forces sender to 'hello@demomailtrap.co' and recipient to request.email
     to support demo accounts, appending the original recipient email to the text body and HTML.
     """
     MAILTRAP_API_TOKEN = os.getenv("MAILTRAP_API_TOKEN")
-    recipient_email = request.userEmail
+    recipient_email = request.email
 
     # Check for placeholders or missing credentials
     is_placeholder = (
