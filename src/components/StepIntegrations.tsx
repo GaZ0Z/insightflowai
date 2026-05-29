@@ -16,8 +16,10 @@ export const StepIntegrations = () => {
     toast.info("Connecting to Shopify API gateway...");
 
     try {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://insightflowai-9qko.onrender.com';
+      
       // 1. Fetch mock orders from backend
-      const ordersResponse = await fetch('http://localhost:8000/api/mock-shopify-orders');
+      const ordersResponse = await fetch(`${API_BASE_URL}/api/mock-shopify-orders`);
       if (!ordersResponse.ok) {
         throw new Error(`Shopify connection returned status ${ordersResponse.status}`);
       }
@@ -30,7 +32,7 @@ export const StepIntegrations = () => {
 
       // 2. Trigger Gemini AI Campaign write proxy
       toast.info("Analyzing churn metrics & generating AI copy...");
-      const campaignResponse = await fetch('http://localhost:8000/api/generate-strategy', {
+      const campaignResponse = await fetch(`${API_BASE_URL}/api/generate-strategy`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

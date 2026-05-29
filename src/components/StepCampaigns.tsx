@@ -32,7 +32,8 @@ export const StepCampaigns = () => {
     toast.info(`Relaying SMTP packet for ${name}...`);
 
     try {
-      const response = await fetch('http://localhost:8000/api/send-campaign', {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://insightflowai-9qko.onrender.com';
+      const response = await fetch(`${API_BASE_URL}/api/send-campaign`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
