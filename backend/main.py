@@ -273,13 +273,19 @@ async def send_campaign(request: SendCampaignRequest):
     to support demo accounts, appending the original recipient email to the text body and HTML.
     """
     MAILTRAP_API_TOKEN = os.getenv("MAILTRAP_API_TOKEN")
+    
+    # Ensure recipient email is provided
     recipient_email = request.email
+    if not recipient_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Recipient email address (request.email) must be provided."
+        )
 
     # Check for placeholders or missing credentials
     is_placeholder = (
         not MAILTRAP_API_TOKEN or 
-        MAILTRAP_API_TOKEN == "your_mailtrap_api_token" or 
-        not recipient_email
+        MAILTRAP_API_TOKEN == "your_mailtrap_api_token"
     )
 
     if is_placeholder:
