@@ -6,7 +6,7 @@ import { Badge } from './ui/Badge';
 import { toast } from './ui/Toast';
 
 export const StepCampaigns = () => {
-  const { shopifyOrders, generatedCampaigns, updateEmailStatus, resetWorkflow } = useWorkflowStore();
+  const { shopifyOrders, generatedCampaigns, updateEmailStatus, resetWorkflow, user } = useWorkflowStore();
   const [selectedEmailIdx, setSelectedEmailIdx] = useState<number>(0);
   const [editorMode, setEditorMode] = useState<'visual' | 'code'>('visual');
 
@@ -32,6 +32,7 @@ export const StepCampaigns = () => {
     toast.info(`Relaying SMTP packet for ${name}...`);
 
     try {
+      const userEmail = user?.email || 'a.sandikci11@gmail.com';
       const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://insightflowai-9qko.onrender.com';
       const response = await fetch(`${API_BASE_URL}/api/send-campaign`, {
         method: 'POST',
@@ -43,6 +44,7 @@ export const StepCampaigns = () => {
           email: emailAddress,
           subject,
           body,
+          userEmail,
           productName,
           productImageUrl,
           htmlBody
