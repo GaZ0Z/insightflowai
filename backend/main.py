@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from supabase import create_client
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +21,20 @@ logger = logging.getLogger("insightflow-backend")
 # Load environment variables
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
+
+# Initialize Supabase client
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase_client = None
+
+if supabase_url and supabase_key:
+    try:
+        supabase_client = create_client(supabase_url, supabase_key)
+        logger.info("Supabase client initialized successfully on backend.")
+    except Exception as e:
+        logger.error(f"Error initializing Supabase client: {str(e)}")
+else:
+    logger.warning("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing. Supabase inserts will be skipped.")
 
 # Configure GenAI Client
 client = None
@@ -532,10 +547,13 @@ def shopify_auth(shop: str):
 async def shopify_callback(shop: str, code: str, hmac: str):
     """
     Callback endpoint where Shopify sends the authorization code.
-    Exchanges the authorization code for a permanent access token.
+    Exchanges the authorization code for a permanent access token,
+    saves the access token to Supabase database user_integrations,
+    and redirects the user back to the frontend integration step.
     """
     SHOPIFY_CLIENT_ID = os.getenv("SHOPIFY_CLIENT_ID", "placeholder_client_id")
     SHOPIFY_CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "placeholder_client_secret")
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
     
     if not shop or not code:
         raise HTTPException(status_code=400, detail="Missing 'shop' or 'code' query parameters.")
@@ -547,34 +565,40 @@ async def shopify_callback(shop: str, code: str, hmac: str):
         "code": code
     }
     
+    access_token = None
     try:
         logger.info(f"Exchanging temporary OAuth code for access token with shop: {shop}")
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload)
             
-        if response.status_code != 200:
+        if response.status_code == 200:
+            token_data = response.json()
+            access_token = token_data.get("access_token")
+        else:
             logger.error(f"Failed to exchange token from Shopify: {response.text}")
-            raise HTTPException(
-                status_code=response.status_code, 
-                detail=f"Shopify OAuth exchange returned error: {response.text}"
-            )
-            
-        token_data = response.json()
-        access_token = token_data.get("access_token")
-        
-        if not access_token:
-            raise HTTPException(status_code=502, detail="Failed to retrieve access token from Shopify response.")
-            
-        return {
-            "access_token": access_token,
-            "shop": shop
-        }
-    except httpx.RequestError as exc:
-        logger.error(f"An error occurred while requesting Shopify access token: {str(exc)}")
-        raise HTTPException(status_code=502, detail=f"Shopify connection request failed: {str(exc)}")
     except Exception as exc:
-        logger.error(f"Unexpected error during Shopify callback: {str(exc)}")
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.error(f"Shopify OAuth code exchange failed: {str(exc)}")
+        
+    # If access_token exchange succeeded, insert to user_integrations table
+    if access_token:
+        try:
+            if supabase_client:
+                logger.info(f"Inserting shop_domain={shop} and access_token to user_integrations table...")
+                supabase_client.table("user_integrations").insert({
+                    "shop_domain": shop,
+                    "access_token": access_token
+                }).execute()
+                logger.info("Successfully inserted integration row in Supabase database.")
+            else:
+                logger.warning("Supabase client not initialized. Skipping database insertion.")
+        except Exception as exc:
+            logger.error(f"Failed to insert user_integration in Supabase: {str(exc)}")
+            print(f"Failed to insert user_integration in Supabase: {str(exc)}")
+            
+    # Redirect user back to the frontend integration step
+    redirect_target = f"{FRONTEND_URL.rstrip('/')}/"
+    logger.info(f"Shopify OAuth callback process completed. Redirecting to: {redirect_target}")
+    return RedirectResponse(url=redirect_target)
 
 if __name__ == "__main__":
     import uvicorn
