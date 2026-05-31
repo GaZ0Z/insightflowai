@@ -2,9 +2,11 @@ import os
 import json
 import logging
 import mailtrap as mt
+import httpx
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -498,6 +500,81 @@ async def send_campaign(request: SendCampaignRequest):
             status_code=502,
             detail=f"Mailtrap API HTML sending failed: {str(err)}"
         )
+
+@app.get("/api/shopify/auth")
+def shopify_auth(shop: str):
+    """
+    Initiates the Shopify OAuth 2.0 flow.
+    Redirects the user to the Shopify authorization screen.
+    """
+    SHOPIFY_CLIENT_ID = os.getenv("SHOPIFY_CLIENT_ID", "placeholder_client_id")
+    SHOPIFY_REDIRECT_URI = os.getenv("SHOPIFY_REDIRECT_URI", "placeholder_redirect_uri")
+    
+    if not shop:
+        raise HTTPException(status_code=400, detail="Missing 'shop' query parameter.")
+    
+    # Sanitize shop name to ensure it's a valid myshopify.com domain if it doesn't end with it
+    if not shop.endswith(".myshopify.com") and "." not in shop:
+        shop = f"{shop}.myshopify.com"
+        
+    scopes = "read_orders,read_customers,read_products"
+    auth_url = (
+        f"https://{shop}/admin/oauth/authorize?"
+        f"client_id={SHOPIFY_CLIENT_ID}&"
+        f"scope={scopes}&"
+        f"redirect_uri={SHOPIFY_REDIRECT_URI}"
+    )
+    
+    logger.info(f"Redirecting merchant to Shopify authorization URL: {auth_url}")
+    return RedirectResponse(auth_url)
+
+@app.get("/api/shopify/callback")
+async def shopify_callback(shop: str, code: str, hmac: str):
+    """
+    Callback endpoint where Shopify sends the authorization code.
+    Exchanges the authorization code for a permanent access token.
+    """
+    SHOPIFY_CLIENT_ID = os.getenv("SHOPIFY_CLIENT_ID", "placeholder_client_id")
+    SHOPIFY_CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "placeholder_client_secret")
+    
+    if not shop or not code:
+        raise HTTPException(status_code=400, detail="Missing 'shop' or 'code' query parameters.")
+        
+    url = f"https://{shop}/admin/oauth/access_token"
+    payload = {
+        "client_id": SHOPIFY_CLIENT_ID,
+        "client_secret": SHOPIFY_CLIENT_SECRET,
+        "code": code
+    }
+    
+    try:
+        logger.info(f"Exchanging temporary OAuth code for access token with shop: {shop}")
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload)
+            
+        if response.status_code != 200:
+            logger.error(f"Failed to exchange token from Shopify: {response.text}")
+            raise HTTPException(
+                status_code=response.status_code, 
+                detail=f"Shopify OAuth exchange returned error: {response.text}"
+            )
+            
+        token_data = response.json()
+        access_token = token_data.get("access_token")
+        
+        if not access_token:
+            raise HTTPException(status_code=502, detail="Failed to retrieve access token from Shopify response.")
+            
+        return {
+            "access_token": access_token,
+            "shop": shop
+        }
+    except httpx.RequestError as exc:
+        logger.error(f"An error occurred while requesting Shopify access token: {str(exc)}")
+        raise HTTPException(status_code=502, detail=f"Shopify connection request failed: {str(exc)}")
+    except Exception as exc:
+        logger.error(f"Unexpected error during Shopify callback: {str(exc)}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 if __name__ == "__main__":
     import uvicorn
