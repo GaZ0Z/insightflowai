@@ -553,7 +553,7 @@ async def shopify_callback(shop: str, code: str, hmac: str):
     """
     SHOPIFY_CLIENT_ID = os.getenv("SHOPIFY_CLIENT_ID", "placeholder_client_id")
     SHOPIFY_CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "placeholder_client_secret")
-    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "https://insightflowai-nine.vercel.app/")
     
     if not shop or not code:
         raise HTTPException(status_code=400, detail="Missing 'shop' or 'code' query parameters.")
