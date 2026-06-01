@@ -11,11 +11,22 @@ import { supabase } from './lib/supabase';
 function App() {
   const { currentStep, setUser, goToStep, setShopDomain } = useWorkflowStore();
 
+  // Auto-skip Step 1 if shop integration is already persisted in local storage
+  useEffect(() => {
+    const savedShop = localStorage.getItem('connectedShop');
+    if (savedShop) {
+      setShopDomain(savedShop);
+      goToStep(2);
+    }
+  }, [goToStep, setShopDomain]);
+
+  // Catch successful integration OAuth redirections
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('integration') === 'success') {
       const shop = params.get('shop');
       if (shop) {
+        localStorage.setItem('connectedShop', shop);
         setShopDomain(shop);
       }
       goToStep(2);

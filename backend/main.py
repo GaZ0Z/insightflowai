@@ -596,7 +596,7 @@ async def shopify_callback(shop: str, code: str, hmac: str):
             print(f"Failed to insert user_integration in Supabase: {str(exc)}")
             
     # Redirect user back to the frontend integration step
-    redirect_target = f"{FRONTEND_URL.rstrip('/')}/?integration=success"
+    redirect_target = f"{FRONTEND_URL.rstrip('/')}/?integration=success&shop={shop}"
     logger.info(f"Shopify OAuth callback process completed. Redirecting to: {redirect_target}")
     return RedirectResponse(url=redirect_target)
 

@@ -32,14 +32,14 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
     ? { email: localStorage.getItem('insightflow_user') || '' }
     : null,
   isAuthenticated: typeof window !== 'undefined' && !!localStorage.getItem('insightflow_user'),
-  shopDomain: typeof window !== 'undefined' ? localStorage.getItem('insightflow_shop') : null,
+  shopDomain: typeof window !== 'undefined' ? localStorage.getItem('connectedShop') : null,
   login: (email) => {
     localStorage.setItem('insightflow_user', email);
     set({ user: { email }, isAuthenticated: true });
   },
   logout: () => {
     localStorage.removeItem('insightflow_user');
-    localStorage.removeItem('insightflow_shop');
+    localStorage.removeItem('connectedShop');
     set({
       user: null,
       isAuthenticated: false,
@@ -57,9 +57,9 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
   },
   setShopDomain: (shop) => {
     if (shop) {
-      localStorage.setItem('insightflow_shop', shop);
+      localStorage.setItem('connectedShop', shop);
     } else {
-      localStorage.removeItem('insightflow_shop');
+      localStorage.removeItem('connectedShop');
     }
     set({ shopDomain: shop });
   },
@@ -98,7 +98,7 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
       currentStep: step,
     }),
   resetWorkflow: () => {
-    localStorage.removeItem('insightflow_shop');
+    localStorage.removeItem('connectedShop');
     set({
       shopDomain: null,
       currentStep: 1,

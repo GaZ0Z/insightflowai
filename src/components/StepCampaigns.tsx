@@ -19,12 +19,20 @@ export const StepCampaigns = () => {
   const [selectedEmailIdx, setSelectedEmailIdx] = useState<number>(0);
   const [editorMode, setEditorMode] = useState<'visual' | 'code'>('visual');
   const [syncing, setSyncing] = useState<boolean>(false);
+<<<<<<< HEAD
+=======
+  const [syncError, setSyncError] = useState<string | null>(null);
+>>>>>>> 2ae280acac086b56fd47f819b7be99c9e389261b
 
   useEffect(() => {
     const syncShopifyData = async () => {
       if (!shopDomain) return;
       
       setSyncing(true);
+<<<<<<< HEAD
+=======
+      setSyncError(null);
+>>>>>>> 2ae280acac086b56fd47f819b7be99c9e389261b
       
       try {
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://insightflowai-9qko.onrender.com';
@@ -112,6 +120,10 @@ export const StepCampaigns = () => {
         
       } catch (err: any) {
         console.error("Shopify Sync Error:", err);
+<<<<<<< HEAD
+=======
+        setSyncError(err.message || String(err));
+>>>>>>> 2ae280acac086b56fd47f819b7be99c9e389261b
         toast.error(`Shopify Sync failed: ${err.message || err}`);
       } finally {
         setSyncing(false);
