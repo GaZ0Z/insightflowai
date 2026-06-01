@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
 import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
@@ -6,9 +6,120 @@ import { Badge } from './ui/Badge';
 import { toast } from './ui/Toast';
 
 export const StepCampaigns = () => {
-  const { shopifyOrders, generatedCampaigns, updateEmailStatus, resetWorkflow } = useWorkflowStore();
+  const { 
+    shopifyOrders, 
+    generatedCampaigns, 
+    updateEmailStatus, 
+    resetWorkflow, 
+    user,
+    shopDomain,
+    setShopifyOrders,
+    setGeneratedCampaigns
+  } = useWorkflowStore();
   const [selectedEmailIdx, setSelectedEmailIdx] = useState<number>(0);
   const [editorMode, setEditorMode] = useState<'visual' | 'code'>('visual');
+  const [syncing, setSyncing] = useState<boolean>(false);
+
+  useEffect(() => {
+    const syncShopifyData = async () => {
+      if (!shopDomain) return;
+      
+      setSyncing(true);
+      
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://insightflowai-9qko.onrender.com';
+        
+        // 1. Fetch real Shopify orders & KPI summaries from /api/shopify/sync
+        const syncResponse = await fetch(`${API_BASE_URL}/api/shopify/sync?shop=${encodeURIComponent(shopDomain)}`);
+        if (!syncResponse.ok) {
+          const errData = await syncResponse.json().catch(() => ({}));
+          throw new Error(errData.detail || `Failed to sync with Shopify (HTTP ${syncResponse.status})`);
+        }
+        
+        const syncData = await syncResponse.json();
+        const rawOrders = syncData.orders_data || [];
+        
+        // 2. Map raw Shopify API orders to frontend ShopifyOrder interface
+        const mappedOrders = rawOrders.map((order: any) => {
+          const customer = order.customer || {};
+          const customerName = `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Guest Customer';
+          const email = customer.email || order.email || 'no-email@shopify.com';
+          
+          // Calculate days inactive
+          const createdDate = order.created_at ? new Date(order.created_at) : new Date();
+          const diffTime = Math.abs(new Date().getTime() - createdDate.getTime());
+          const daysInactive = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          
+          // Get line items
+          const firstItem = order.line_items?.[0] || {};
+          const productName = firstItem.title || 'Unknown Product';
+          
+          // Churn risks: refunded status or inactive > 90 days
+          const returnCount = order.financial_status === 'refunded' ? 1 : 0;
+          const abandonedCartValue = order.financial_status === 'partially_refunded' ? parseFloat(order.total_price || '0') : 0;
+          let supportTicketTopic = 'None';
+          if (order.financial_status === 'refunded') {
+            supportTicketTopic = 'Product Return Request';
+          }
+          
+          const isAtRisk = daysInactive > 90 || order.financial_status === 'refunded';
+          
+          return {
+            customerName,
+            email,
+            lastOrderDate: order.created_at ? order.created_at.substring(0, 10) : new Date().toISOString().substring(0, 10),
+            totalSpent: parseFloat(order.total_price || '0'),
+            daysInactive,
+            isAtRisk,
+            productName,
+            productImageUrl: `https://picsum.photos/seed/${customerName.replace(/\s+/g, '')}/300/300`,
+            returnCount,
+            abandonedCartValue,
+            supportTicketTopic
+          };
+        });
+        
+        // Update orders in the store
+        setShopifyOrders(mappedOrders);
+        
+        // 3. Call generate-strategy using the mapped orders to get campaigns
+        if (mappedOrders.length > 0) {
+          const strategyResponse = await fetch(`${API_BASE_URL}/api/generate-strategy`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ orders: mappedOrders }),
+          });
+          
+          if (!strategyResponse.ok) {
+            const errData = await strategyResponse.json().catch(() => ({}));
+            throw new Error(errData.detail || "Failed to generate AI email campaigns strategy.");
+          }
+          
+          const strategyData = await strategyResponse.json();
+          const emails = (strategyData.emails || []).map((email: any) => ({
+            ...email,
+            status: 'draft'
+          }));
+          
+          setGeneratedCampaigns(emails);
+          toast.success("Successfully synchronized store metrics and AI campaigns!");
+        } else {
+          setGeneratedCampaigns([]);
+          toast.info("Store has no orders to analyze.");
+        }
+        
+      } catch (err: any) {
+        console.error("Shopify Sync Error:", err);
+        toast.error(`Shopify Sync failed: ${err.message || err}`);
+      } finally {
+        setSyncing(false);
+      }
+    };
+    
+    syncShopifyData();
+  }, [shopDomain, setShopifyOrders, setGeneratedCampaigns]);
 
   // Totals calculations
   const totalOrders = shopifyOrders.length;
@@ -32,7 +143,9 @@ export const StepCampaigns = () => {
     toast.info(`Relaying SMTP packet for ${name}...`);
 
     try {
-      const response = await fetch('http://localhost:8000/api/send-campaign', {
+      const userEmail = user?.email || 'a.sandikci11@gmail.com';
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://insightflowai-9qko.onrender.com';
+      const response = await fetch(`${API_BASE_URL}/api/send-campaign`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -42,6 +155,7 @@ export const StepCampaigns = () => {
           email: emailAddress,
           subject,
           body,
+          userEmail,
           productName,
           productImageUrl,
           htmlBody
@@ -116,6 +230,17 @@ export const StepCampaigns = () => {
         return 'outline';
     }
   };
+
+  if (syncing) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
+        <div className="h-10 w-10 border-4 border-brand border-t-transparent rounded-full animate-spin" />
+        <p className="text-slate-400 font-medium text-sm animate-pulse">
+          Syncing data from Shopify...
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">

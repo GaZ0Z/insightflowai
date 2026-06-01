@@ -2,14 +2,17 @@ import os
 import json
 import logging
 import mailtrap as mt
+import httpx
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from supabase import create_client
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +21,20 @@ logger = logging.getLogger("insightflow-backend")
 # Load environment variables
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
+
+# Initialize Supabase client
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase_client = None
+
+if supabase_url and supabase_key:
+    try:
+        supabase_client = create_client(supabase_url, supabase_key)
+        logger.info("Supabase client initialized successfully on backend.")
+    except Exception as e:
+        logger.error(f"Error initializing Supabase client: {str(e)}")
+else:
+    logger.warning("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing. Supabase inserts will be skipped.")
 
 # Configure GenAI Client
 client = None
@@ -32,20 +49,13 @@ else:
 
 app = FastAPI(title="InsightFlow AI Backend Proxy")
 
-# Enable CORS for local React development
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-
+# Enable global CORS access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],           # Tüm domainlerden gelen isteklere izin ver
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],           # GET, POST, OPTIONS dahil her türlü metoda izin ver
+    allow_headers=["*"],           # Tüm başlık bilgilerine izin ver
 )
 
 # Models
@@ -63,6 +73,7 @@ class SendCampaignRequest(BaseModel):
     email: str
     subject: str
     body: str
+    userEmail: str
     productName: Optional[str] = None
     productImageUrl: Optional[str] = None
     htmlBody: Optional[str] = None
@@ -504,6 +515,164 @@ async def send_campaign(request: SendCampaignRequest):
             status_code=502,
             detail=f"Mailtrap API HTML sending failed: {str(err)}"
         )
+
+@app.get("/api/shopify/auth")
+def shopify_auth(shop: str):
+    """
+    Initiates the Shopify OAuth 2.0 flow.
+    Redirects the user to the Shopify authorization screen.
+    """
+    SHOPIFY_CLIENT_ID = os.getenv("SHOPIFY_CLIENT_ID", "placeholder_client_id")
+    SHOPIFY_REDIRECT_URI = os.getenv("SHOPIFY_REDIRECT_URI", "placeholder_redirect_uri")
+    
+    if not shop:
+        raise HTTPException(status_code=400, detail="Missing 'shop' query parameter.")
+    
+    # Sanitize shop name to ensure it's a valid myshopify.com domain if it doesn't end with it
+    if not shop.endswith(".myshopify.com") and "." not in shop:
+        shop = f"{shop}.myshopify.com"
+        
+    scopes = "read_orders,read_customers,read_products"
+    auth_url = (
+        f"https://{shop}/admin/oauth/authorize?"
+        f"client_id={SHOPIFY_CLIENT_ID}&"
+        f"scope={scopes}&"
+        f"redirect_uri={SHOPIFY_REDIRECT_URI}"
+    )
+    
+    logger.info(f"Redirecting merchant to Shopify authorization URL: {auth_url}")
+    return RedirectResponse(auth_url)
+
+@app.get("/api/shopify/callback")
+async def shopify_callback(shop: str, code: str, hmac: str):
+    """
+    Callback endpoint where Shopify sends the authorization code.
+    Exchanges the authorization code for a permanent access token,
+    saves the access token to Supabase database user_integrations,
+    and redirects the user back to the frontend integration step.
+    """
+    SHOPIFY_CLIENT_ID = os.getenv("SHOPIFY_CLIENT_ID", "placeholder_client_id")
+    SHOPIFY_CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "placeholder_client_secret")
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "https://insightflowai-nine.vercel.app/")
+    
+    if not shop or not code:
+        raise HTTPException(status_code=400, detail="Missing 'shop' or 'code' query parameters.")
+        
+    url = f"https://{shop}/admin/oauth/access_token"
+    payload = {
+        "client_id": SHOPIFY_CLIENT_ID,
+        "client_secret": SHOPIFY_CLIENT_SECRET,
+        "code": code
+    }
+    
+    access_token = None
+    try:
+        logger.info(f"Exchanging temporary OAuth code for access token with shop: {shop}")
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload)
+            
+        if response.status_code == 200:
+            token_data = response.json()
+            access_token = token_data.get("access_token")
+        else:
+            logger.error(f"Failed to exchange token from Shopify: {response.text}")
+    except Exception as exc:
+        logger.error(f"Shopify OAuth code exchange failed: {str(exc)}")
+        
+    # If access_token exchange succeeded, insert to user_integrations table
+    if access_token:
+        try:
+            if supabase_client:
+                logger.info(f"Inserting shop_domain={shop} and access_token to user_integrations table...")
+                supabase_client.table("user_integrations").insert({
+                    "shop_domain": shop,
+                    "access_token": access_token
+                }).execute()
+                logger.info("Successfully inserted integration row in Supabase database.")
+            else:
+                logger.warning("Supabase client not initialized. Skipping database insertion.")
+        except Exception as exc:
+            logger.error(f"Failed to insert user_integration in Supabase: {str(exc)}")
+            print(f"Failed to insert user_integration in Supabase: {str(exc)}")
+            
+    # Redirect user back to the frontend integration step
+    redirect_target = f"{FRONTEND_URL.rstrip('/')}/?integration=success"
+    logger.info(f"Shopify OAuth callback process completed. Redirecting to: {redirect_target}")
+    return RedirectResponse(url=redirect_target)
+
+@app.get("/api/shopify/sync")
+async def shopify_sync(shop: str):
+    """
+    Queries the Supabase user_integrations table to retrieve the access token for the given shop,
+    then requests orders from the Shopify Admin API, calculates total orders and at-risk churns,
+    and returns the summarized orders.
+    """
+    if not shop:
+        raise HTTPException(status_code=400, detail="Missing 'shop' query parameter.")
+        
+    # Sanitize shop name to ensure it's a valid myshopify.com domain if it doesn't end with it
+    if not shop.endswith(".myshopify.com") and "." not in shop:
+        shop = f"{shop}.myshopify.com"
+
+    if not supabase_client:
+        raise HTTPException(status_code=500, detail="Supabase client is not initialized on the backend.")
+
+    try:
+        logger.info(f"Querying user_integrations for shop_domain: {shop}")
+        response = supabase_client.table("user_integrations").select("access_token").eq("shop_domain", shop).execute()
+        records = response.data
+        if not records:
+            raise HTTPException(status_code=404, detail=f"No access token found for shop '{shop}'")
+        
+        access_token = records[0].get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=404, detail=f"Access token for shop '{shop}' is empty")
+            
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Error querying Supabase: {str(exc)}")
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(exc)}")
+
+    # Shopify Admin API GET request
+    shopify_url = f"https://{shop}/admin/api/2024-01/orders.json?status=any"
+    headers = {
+        "X-Shopify-Access-Token": access_token,
+        "Content-Type": "application/json"
+    }
+
+    try:
+        logger.info(f"Fetching orders from Shopify Admin API for {shop}...")
+        async with httpx.AsyncClient() as client:
+            shopify_res = await client.get(shopify_url, headers=headers)
+            
+        if shopify_res.status_code != 200:
+            logger.error(f"Shopify Admin API returned status {shopify_res.status_code}: {shopify_res.text}")
+            raise HTTPException(
+                status_code=shopify_res.status_code, 
+                detail=f"Shopify Admin API error: {shopify_res.text}"
+            )
+            
+        shopify_data = shopify_res.json()
+        orders = shopify_data.get("orders", [])
+        
+        total_orders = len(orders)
+        
+        # Count at_risk_churns (orders that have a financial_status of 'refunded' or simulate a churn logic for now)
+        at_risk_churns = sum(1 for o in orders if o.get("financial_status") == "refunded")
+        
+        logger.info(f"Shopify sync complete: {total_orders} orders found, {at_risk_churns} at risk churns.")
+        return {
+            "total_orders": total_orders,
+            "at_risk_churns": at_risk_churns,
+            "orders_data": orders
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to fetch or parse orders from Shopify: {str(exc)}")
+        raise HTTPException(status_code=502, detail=f"Shopify fetching failed: {str(exc)}")
 
 if __name__ == "__main__":
     import uvicorn
