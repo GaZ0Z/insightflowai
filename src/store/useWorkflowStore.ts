@@ -8,6 +8,8 @@ interface WorkflowState {
   login: (email: string) => void;
   logout: () => void;
   setUser: (user: User | null) => void;
+  shopDomain: string | null;
+  setShopDomain: (shop: string | null) => void;
 
   // Workflow steps
   currentStep: number;
@@ -30,15 +32,18 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
     ? { email: localStorage.getItem('insightflow_user') || '' }
     : null,
   isAuthenticated: typeof window !== 'undefined' && !!localStorage.getItem('insightflow_user'),
+  shopDomain: typeof window !== 'undefined' ? localStorage.getItem('insightflow_shop') : null,
   login: (email) => {
     localStorage.setItem('insightflow_user', email);
     set({ user: { email }, isAuthenticated: true });
   },
   logout: () => {
     localStorage.removeItem('insightflow_user');
+    localStorage.removeItem('insightflow_shop');
     set({
       user: null,
       isAuthenticated: false,
+      shopDomain: null,
       currentStep: 1,
       shopifyOrders: [],
       generatedCampaigns: [],
@@ -49,6 +54,14 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
       user,
       isAuthenticated: !!user,
     });
+  },
+  setShopDomain: (shop) => {
+    if (shop) {
+      localStorage.setItem('insightflow_shop', shop);
+    } else {
+      localStorage.removeItem('insightflow_shop');
+    }
+    set({ shopDomain: shop });
   },
 
   // Workflow State
@@ -84,10 +97,13 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
     set({
       currentStep: step,
     }),
-  resetWorkflow: () =>
+  resetWorkflow: () => {
+    localStorage.removeItem('insightflow_shop');
     set({
+      shopDomain: null,
       currentStep: 1,
       shopifyOrders: [],
       generatedCampaigns: [],
-    }),
+    });
+  },
 }));

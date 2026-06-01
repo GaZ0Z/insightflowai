@@ -9,15 +9,19 @@ import { Toaster } from './components/ui/Toast';
 import { supabase } from './lib/supabase';
 
 function App() {
-  const { currentStep, setUser, goToStep } = useWorkflowStore();
+  const { currentStep, setUser, goToStep, setShopDomain } = useWorkflowStore();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('integration') === 'success') {
+      const shop = params.get('shop');
+      if (shop) {
+        setShopDomain(shop);
+      }
       goToStep(2);
       window.history.replaceState({}, '', window.location.pathname);
     }
-  }, [goToStep]);
+  }, [goToStep, setShopDomain]);
 
   useEffect(() => {
     // Get initial session
