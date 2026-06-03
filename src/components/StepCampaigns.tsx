@@ -13,6 +13,7 @@ export const StepCampaigns = () => {
     resetWorkflow, 
     user,
     shopDomain,
+    isMockData,
     setShopifyOrders,
     setGeneratedCampaigns
   } = useWorkflowStore();
@@ -29,55 +30,66 @@ export const StepCampaigns = () => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://insightflowai-9qko.onrender.com';
         
-        // 1. Fetch real Shopify orders & KPI summaries from /api/shopify/sync
-        const syncResponse = await fetch(`${API_BASE_URL}/api/shopify/sync?shop=${encodeURIComponent(shopDomain)}`);
-        if (!syncResponse.ok) {
-          const errData = await syncResponse.json().catch(() => ({}));
-          throw new Error(errData.detail || `Failed to sync with Shopify (HTTP ${syncResponse.status})`);
-        }
+        let mappedOrders = [];
         
-        const syncData = await syncResponse.json();
-        const rawOrders = syncData.orders_data || [];
-        
-        // 2. Map raw Shopify API orders to frontend ShopifyOrder interface
-        const mappedOrders = rawOrders.map((order: any) => {
-          const customer = order.customer || {};
-          const customerName = `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Guest Customer';
-          const email = customer.email || order.email || 'no-email@shopify.com';
-          
-          // Calculate days inactive
-          const createdDate = order.created_at ? new Date(order.created_at) : new Date();
-          const diffTime = Math.abs(new Date().getTime() - createdDate.getTime());
-          const daysInactive = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          
-          // Get line items
-          const firstItem = order.line_items?.[0] || {};
-          const productName = firstItem.title || 'Unknown Product';
-          
-          // Churn risks: refunded status or inactive > 90 days
-          const returnCount = order.financial_status === 'refunded' ? 1 : 0;
-          const abandonedCartValue = order.financial_status === 'partially_refunded' ? parseFloat(order.total_price || '0') : 0;
-          let supportTicketTopic = 'None';
-          if (order.financial_status === 'refunded') {
-            supportTicketTopic = 'Product Return Request';
+        if (isMockData) {
+          console.info("Loading mock data instead of real Shopify API connection.");
+          const mockResponse = await fetch(`${API_BASE_URL}/api/mock-shopify-orders`);
+          if (!mockResponse.ok) {
+            throw new Error(`Failed to fetch mock orders (HTTP ${mockResponse.status})`);
+          }
+          mappedOrders = await mockResponse.json();
+        } else {
+          // 1. Fetch real Shopify orders & KPI summaries from /api/shopify/sync
+          const syncResponse = await fetch(`${API_BASE_URL}/api/shopify/sync?shop=${encodeURIComponent(shopDomain)}`);
+          if (!syncResponse.ok) {
+            const errData = await syncResponse.json().catch(() => ({}));
+            throw new Error(errData.detail || `Failed to sync with Shopify (HTTP ${syncResponse.status})`);
           }
           
-          const isAtRisk = daysInactive > 90 || order.financial_status === 'refunded';
+          const syncData = await syncResponse.json();
+          const rawOrders = syncData.orders_data || [];
           
-          return {
-            customerName,
-            email,
-            lastOrderDate: order.created_at ? order.created_at.substring(0, 10) : new Date().toISOString().substring(0, 10),
-            totalSpent: parseFloat(order.total_price || '0'),
-            daysInactive,
-            isAtRisk,
-            productName,
-            productImageUrl: `https://picsum.photos/seed/${customerName.replace(/\s+/g, '')}/300/300`,
-            returnCount,
-            abandonedCartValue,
-            supportTicketTopic
-          };
-        });
+          // 2. Map raw Shopify API orders to frontend ShopifyOrder interface
+          mappedOrders = rawOrders.map((order: any) => {
+            const customer = order.customer || {};
+            const customerName = `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Guest Customer';
+            const email = customer.email || order.email || 'no-email@shopify.com';
+            
+            // Calculate days inactive
+            const createdDate = order.created_at ? new Date(order.created_at) : new Date();
+            const diffTime = Math.abs(new Date().getTime() - createdDate.getTime());
+            const daysInactive = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            // Get line items
+            const firstItem = order.line_items?.[0] || {};
+            const productName = firstItem.title || 'Unknown Product';
+            
+            // Churn risks: refunded status or inactive > 90 days
+            const returnCount = order.financial_status === 'refunded' ? 1 : 0;
+            const abandonedCartValue = order.financial_status === 'partially_refunded' ? parseFloat(order.total_price || '0') : 0;
+            let supportTicketTopic = 'None';
+            if (order.financial_status === 'refunded') {
+              supportTicketTopic = 'Product Return Request';
+            }
+            
+            const isAtRisk = daysInactive > 90 || order.financial_status === 'refunded';
+            
+            return {
+              customerName,
+              email,
+              lastOrderDate: order.created_at ? order.created_at.substring(0, 10) : new Date().toISOString().substring(0, 10),
+              totalSpent: parseFloat(order.total_price || '0'),
+              daysInactive,
+              isAtRisk,
+              productName,
+              productImageUrl: `https://picsum.photos/seed/${customerName.replace(/\s+/g, '')}/300/300`,
+              returnCount,
+              abandonedCartValue,
+              supportTicketTopic
+            };
+          });
+        }
         
         // Update orders in the store
         setShopifyOrders(mappedOrders);
@@ -104,7 +116,11 @@ export const StepCampaigns = () => {
           }));
           
           setGeneratedCampaigns(emails);
-          toast.success("Successfully synchronized store metrics and AI campaigns!");
+          toast.success(
+            isMockData 
+              ? "Successfully compiled AI campaigns from mock store data!"
+              : "Successfully synchronized store metrics and AI campaigns!"
+          );
         } else {
           setGeneratedCampaigns([]);
           toast.info("Store has no orders to analyze.");
@@ -119,7 +135,7 @@ export const StepCampaigns = () => {
     };
     
     syncShopifyData();
-  }, [shopDomain, setShopifyOrders, setGeneratedCampaigns]);
+  }, [shopDomain, isMockData, setShopifyOrders, setGeneratedCampaigns]);
 
   // Totals calculations
   const totalOrders = shopifyOrders.length;

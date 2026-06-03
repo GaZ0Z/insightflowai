@@ -9,16 +9,18 @@ import { Toaster } from './components/ui/Toast';
 import { supabase } from './lib/supabase';
 
 function App() {
-  const { currentStep, setUser, goToStep, setShopDomain } = useWorkflowStore();
+  const { currentStep, setUser, goToStep, setShopDomain, setIsMockData } = useWorkflowStore();
 
   // Auto-skip Step 1 if shop integration is already persisted in local storage
   useEffect(() => {
     const savedShop = localStorage.getItem('connectedShop');
+    const savedIsMock = localStorage.getItem('insightflow_is_mock') === 'true';
     if (savedShop) {
       setShopDomain(savedShop);
+      setIsMockData(savedIsMock);
       goToStep(2);
     }
-  }, [goToStep, setShopDomain]);
+  }, [goToStep, setShopDomain, setIsMockData]);
 
   // Catch successful integration OAuth redirections
   useEffect(() => {
@@ -27,12 +29,14 @@ function App() {
       const shop = params.get('shop');
       if (shop) {
         localStorage.setItem('connectedShop', shop);
+        localStorage.removeItem('insightflow_is_mock');
+        setIsMockData(false);
         setShopDomain(shop);
       }
       goToStep(2);
       window.history.replaceState({}, '', window.location.pathname);
     }
-  }, [goToStep, setShopDomain]);
+  }, [goToStep, setShopDomain, setIsMockData]);
 
   useEffect(() => {
     // Get initial session

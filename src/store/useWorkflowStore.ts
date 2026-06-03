@@ -10,6 +10,8 @@ interface WorkflowState {
   setUser: (user: User | null) => void;
   shopDomain: string | null;
   setShopDomain: (shop: string | null) => void;
+  isMockData: boolean;
+  setIsMockData: (val: boolean) => void;
 
   // Workflow steps
   currentStep: number;
@@ -33,6 +35,7 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
     : null,
   isAuthenticated: typeof window !== 'undefined' && !!localStorage.getItem('insightflow_user'),
   shopDomain: typeof window !== 'undefined' ? localStorage.getItem('connectedShop') : null,
+  isMockData: typeof window !== 'undefined' ? localStorage.getItem('insightflow_is_mock') === 'true' : false,
   login: (email) => {
     localStorage.setItem('insightflow_user', email);
     set({ user: { email }, isAuthenticated: true });
@@ -40,10 +43,12 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
   logout: () => {
     localStorage.removeItem('insightflow_user');
     localStorage.removeItem('connectedShop');
+    localStorage.removeItem('insightflow_is_mock');
     set({
       user: null,
       isAuthenticated: false,
       shopDomain: null,
+      isMockData: false,
       currentStep: 1,
       shopifyOrders: [],
       generatedCampaigns: [],
@@ -62,6 +67,14 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
       localStorage.removeItem('connectedShop');
     }
     set({ shopDomain: shop });
+  },
+  setIsMockData: (val) => {
+    if (val) {
+      localStorage.setItem('insightflow_is_mock', 'true');
+    } else {
+      localStorage.removeItem('insightflow_is_mock');
+    }
+    set({ isMockData: val });
   },
 
   // Workflow State
@@ -99,8 +112,10 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
     }),
   resetWorkflow: () => {
     localStorage.removeItem('connectedShop');
+    localStorage.removeItem('insightflow_is_mock');
     set({
       shopDomain: null,
+      isMockData: false,
       currentStep: 1,
       shopifyOrders: [],
       generatedCampaigns: [],

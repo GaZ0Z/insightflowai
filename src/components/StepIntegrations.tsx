@@ -5,16 +5,24 @@ import { toast } from './ui/Toast';
 import { Input } from './ui/Input';
 
 export const StepIntegrations = () => {
-  const { user } = useWorkflowStore();
-  const [shopDomain, setShopDomain] = useState('');
+  const { user, setIsMockData, setShopDomain, goToStep } = useWorkflowStore();
+  const [shopDomainInput, setShopDomainInput] = useState('');
 
   const connectShopify = () => {
-    if (!shopDomain.trim()) {
+    if (!shopDomainInput.trim()) {
       toast.error("Please enter your Shopify store domain.");
       return;
     }
+    setIsMockData(false);
+    setShopDomain(shopDomainInput.trim());
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://insightflowai-9qko.onrender.com';
-    window.location.href = `${API_BASE_URL}/api/shopify/auth?shop=${encodeURIComponent(shopDomain.trim())}`;
+    window.location.href = `${API_BASE_URL}/api/shopify/auth?shop=${encodeURIComponent(shopDomainInput.trim())}`;
+  };
+
+  const connectMockData = () => {
+    setIsMockData(true);
+    setShopDomain('mock-shop.myshopify.com');
+    goToStep(2);
   };
 
   return (
@@ -54,15 +62,18 @@ export const StepIntegrations = () => {
               <Input
                 type="text"
                 placeholder="mystore.myshopify.com"
-                value={shopDomain}
-                onChange={(e) => setShopDomain(e.target.value)}
+                value={shopDomainInput}
+                onChange={(e) => setShopDomainInput(e.target.value)}
               />
             </div>
           </div>
           
-          <div className="mt-8">
+          <div className="mt-8 space-y-3">
             <Button onClick={connectShopify} className="w-full bg-[#95BF47] hover:bg-[#83aa3d] text-slate-950 font-bold border-0 shadow-lg shadow-[#95BF47]/10">
               Connect Shopify Store
+            </Button>
+            <Button onClick={connectMockData} variant="outline" className="w-full border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 font-bold">
+              Continue with Mock Data
             </Button>
           </div>
         </div>
