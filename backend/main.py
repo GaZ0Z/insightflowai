@@ -659,7 +659,25 @@ async def shopify_sync(shop: str):
         total_orders = len(orders)
         
         # Count at_risk_churns (orders that have a financial_status of 'refunded' or simulate a churn logic for now)
-        at_risk_churns = sum(1 for o in orders if o.get("financial_status") == "refunded")
+        # TODO: Change back to 90 days for production.
+        at_risk_churns = 0
+        from datetime import datetime
+        for o in orders:
+            is_at_risk = False
+            created_at_str = o.get("created_at")
+            if created_at_str:
+                try:
+                    created_date_str = created_at_str.split('T')[0]
+                    created_dt = datetime.strptime(created_date_str, "%Y-%m-%d")
+                    days_inactive = (datetime.now() - created_dt).days
+                    if days_inactive > 0 or o.get("financial_status") == "refunded":
+                        is_at_risk = True
+                except Exception:
+                    is_at_risk = True
+            else:
+                is_at_risk = True
+            if is_at_risk:
+                at_risk_churns += 1
         
         logger.info(f"Shopify sync complete: {total_orders} orders found, {at_risk_churns} at risk churns.")
         return {
