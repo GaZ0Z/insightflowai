@@ -23,9 +23,17 @@ load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
 
 # Initialize Supabase client
-supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+# Fallback support for SUPABASE_KEY and direct environment variables reading
+supabase_url = os.environ.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
+supabase_key = (
+    os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY") or 
+    os.environ.get("SUPABASE_KEY") or 
+    os.getenv("SUPABASE_KEY")
+)
 supabase_client = None
+
+logger.info(f"Supabase Client Config Checking - URL present: {bool(supabase_url)}, Key present: {bool(supabase_key)}")
 
 if supabase_url and supabase_key:
     try:
@@ -34,7 +42,7 @@ if supabase_url and supabase_key:
     except Exception as e:
         logger.error(f"Error initializing Supabase client: {str(e)}")
 else:
-    logger.warning("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing. Supabase inserts will be skipped.")
+    logger.warning("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY/SUPABASE_KEY is missing. Supabase inserts will be skipped.")
 
 # Configure GenAI Client
 client = None
@@ -582,6 +590,22 @@ async def shopify_callback(shop: str, code: str, hmac: str):
     # If access_token exchange succeeded, insert to user_integrations table
     if access_token:
         try:
+            global supabase_client
+            if not supabase_client:
+                url = os.environ.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
+                key = (
+                    os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
+                    os.getenv("SUPABASE_SERVICE_ROLE_KEY") or 
+                    os.environ.get("SUPABASE_KEY") or 
+                    os.getenv("SUPABASE_KEY")
+                )
+                if url and key:
+                    try:
+                        supabase_client = create_client(url, key)
+                        logger.info("Supabase client initialized lazily during callback route.")
+                    except Exception as e:
+                        logger.error(f"Error lazily initializing Supabase client during callback: {str(e)}")
+
             if supabase_client:
                 logger.info(f"Inserting shop_domain={shop} and access_token to user_integrations table...")
                 supabase_client.table("user_integrations").insert({
@@ -614,8 +638,27 @@ async def shopify_sync(shop: str):
     if not shop.endswith(".myshopify.com") and "." not in shop:
         shop = f"{shop}.myshopify.com"
 
+    global supabase_client
     if not supabase_client:
-        raise HTTPException(status_code=500, detail="Supabase client is not initialized on the backend.")
+        # Lazy initialization check to resolve start order or container env mapping delays
+        url = os.environ.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
+        key = (
+            os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY") or 
+            os.environ.get("SUPABASE_KEY") or 
+            os.getenv("SUPABASE_KEY")
+        )
+        if url and key:
+            try:
+                supabase_client = create_client(url, key)
+                logger.info("Supabase client initialized lazily during sync route request.")
+            except Exception as e:
+                logger.error(f"Error lazily initializing Supabase client: {str(e)}")
+        
+        if not supabase_client:
+            print(f"URL: {url}, KEY: {key}")
+            logger.error(f"Supabase client is not initialized on the backend. Debug - URL: {url}, KEY: {key}")
+            raise HTTPException(status_code=500, detail="Supabase client is not initialized on the backend.")
 
     try:
         logger.info(f"Querying user_integrations for shop_domain: {shop}")
